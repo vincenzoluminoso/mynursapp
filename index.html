@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyNursApp Pro - Gestionale Infermieri</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, addDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    
+    // Le TUE chiavi segrete
+    const firebaseConfig = {
+      apiKey: "AIzaSyCMCoT0DAq6KFgUHbMBJpJwvsom21WUuuA",
+      authDomain: "mynursapp-pro.firebaseapp.com",
+      projectId: "mynursapp-pro",
+      storageBucket: "mynursapp-pro.firebasestorage.app",
+      messagingSenderId: "39197762286",
+      appId: "1:39197762286:web:cf4707f13988b582a909ff"
+    };
+    
+    window.fConfig = firebaseConfig;
+    window.firebaseInitializeApp = initializeApp;
+    window.fAuth = { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut };
+    window.fDb = { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, addDoc, deleteDoc };
+  </script>
+</head>
+<body class="bg-slate-50 font-sans text-slate-800">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } = window.fAuth;
+    const { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, addDoc, deleteDoc } = window.fDb;
+
+    const app = window.firebaseInitializeApp(window.fConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    function App() {
+      // Stati dell'app
+      const [user, setUser] = useState(null);
+      const [profile, setProfile] = useState(null);
+      const [isAuthChecking, setIsAuthChecking] = useState(true);
+      
+      // Stati Login
+      const [email, setEmail] = useState('');
+      const [pass, setPass] = useState('');
+      const [isLogin, setIsLogin] = useState(true);
+
+      // Navigazione
+      const [tab, setTab] = useState('dashboard');
+
+      useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, async (u) => {
+          if (u) {
+            const userRef = doc(db, 'utenti', u.uid);
+            const userDoc = await getDoc(userRef);
+            
+            if (userDoc.exists()) {
+              setProfile(userDoc.data());
+              // Ascolta cambiamenti in tempo reale (es. se tu lo abiliti da admin)
+              onSnapshot(userRef, (snap) => setProfile(snap.data()));
+            } else {
+              // Nuovo utente: lo creiamo ma bloccato
+              const nuovoProfilo = { email: u.email, abilitato: false, admin: false, dataCreazione: new Date().toISOString() };
+              await setDoc(userRef, nuovoProfilo);
+              setProfile(nuovoProfilo);
+            }
+            setUser(u);
+          } else {
+            setUser(null);
+            setProfile(null);
+          }
+          setIsAuthChecking(false);
+        });
+        return () => unsubscribe();
+      }, []);
+
+      const handleAuth = async () => {
+        try {
+          if (isLogin) await signInWithEmailAndPassword(auth, email, pass);
+          else await createUserWithEmailAndPassword(auth, email, pass);
+        } catch (e) { alert("Errore: " + e.message); }
+      };
+
+      if (isAuthChecking) return <div className="min-h-screen flex items-center justify-center">Caricamento...</div>;
+
+      // Schermata di Login/Registrazione
+      if (!user) return (
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border">
+            <div className="text-center mb-6">
+              <span className="text-5xl">⚕️</span>
+              <h1 className="text-2xl font-black mt-2 text-indigo-900">MyNursApp Pro</h1>
+            </div>
+            <input className="w-full border p-3 mb-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Email" onChange={e => setEmail(e.target.value)} />
+            <input className="w-full border p-3 mb-4 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" type="password" placeholder="Password" onChange={e => setPass(e.target.value)} />
+            <button onClick={handleAuth} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold shadow-md">{isLogin ? "Accedi" : "Registrati"}</button>
+            <p className="mt-4 text-center text-sm cursor-pointer text-indigo-600 font-medium hover:underline" onClick={() => setIsLogin(!isLogin)}>
+              {isLogin ? "Non hai un account? Registrati" : "Hai già un account? Accedi"}
+            </p>
+          </div>
+        </div>
+      );
+
+      // Schermata Utente Bloccato
+      if (!profile?.abilitato && !profile?.admin) return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-4">
+          <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md text-center border-t-4 border-yellow-400">
+            <span className="text-5xl">⏳</span>
+            <h2 className="text-xl font-bold mt-4 text-slate-800">Account in Revisione</h2>
+            <p className="text-slate-600 mt-2 mb-6">Il tuo account è in attesa di approvazione dall'amministratore.</p>
+            <button onClick={() => signOut(auth)} className="text-indigo-600 font-bold hover:underline">Esci</button>
+          </div>
+        </div>
+      );
+
+      // Schermata Principale (Sbloccata)
+      return (
+        <div className="min-h-screen pb-10">
+          <nav className="bg-indigo-900 text-white shadow-lg sticky top-0 z-50">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">⚕️</span>
+                <h1 className="font-bold text-xl hidden sm:block">MyNursApp <span className="text-indigo-300">Pro</span></h1>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setTab('dashboard')} className={`px-4 py-2 rounded-lg font-medium ${tab==='dashboard'?'bg-indigo-700':'hover:bg-indigo-800'}`}>Dashboard</button>
+                <button onClick={() => setTab('fatture')} className={`px-4 py-2 rounded-lg font-medium ${tab==='fatture'?'bg-indigo-700':'hover:bg-indigo-800'}`}>Fatture</button>
+                {profile?.admin && <button onClick={() => setTab('admin')} className={`px-4 py-2 rounded-lg font-bold text-yellow-300 ${tab==='admin'?'bg-indigo-700':'hover:bg-indigo-800'}`}>Admin</button>}
+              </div>
+              <button onClick={() => signOut(auth)} className="text-red-400 hover:text-red-300 text-sm font-bold ml-4">ESCI</button>
+            </div>
+          </nav>
+
+          <main className="max-w-6xl mx-auto p-4 mt-6">
+            {tab === 'dashboard' && <Dashboard user={user} db={db} />}
+            {tab === 'fatture' && <Fatturazione user={user} db={db} />}
+            {tab === 'admin' && profile?.admin && <AdminPanel db={db} />}
+          </main>
+        </div>
+      );
+    }
+
+    // --- COMPONENTI INTERNI ---
+
+    function Dashboard({ user, db }) {
+      const [fatture, setFatture] = useState([]);
+      const [aliquota, setAliquota] = useState(5);
+
+      useEffect(() => {
+        const q = query(collection(db, 'utenti', user.uid, 'fatture'));
+        const unsub = onSnapshot(q, snap => setFatture(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+        return () => unsub();
+      }, [user, db]);
+
+      const fatturatoLordo = fatture.reduce((acc, curr) => acc + Number(curr.importo), 0);
+      const redditoImponibile = fatturatoLordo * 0.78; // Coefficiente Infermieri
+      const tasseDaPagare = redditoImponibile * (aliquota / 100);
+      const utileNetto = fatturatoLordo - tasseDaPagare;
+
+      return (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow border">
+            <h2 className="text-xl font-bold">Cruscotto Fiscale</h2>
+            <select value={aliquota} onChange={e => setAliquota(Number(e.target.value))} className="bg-slate-100 border p-2 rounded-lg font-bold">
+              <option value={5}>Tasse 5% (Nuove P.IVA)</option>
+              <option value={15}>Tasse 15% (Ordinario Forfettario)</option>
+            </select>
+          </div>
+          <div className="grid md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-3xl shadow border-l-4 border-l-blue-500">
+              <p className="text-sm font-semibold text-slate-500">FATTURATO LORDO</p>
+              <p className="text-4xl font-black mt-2">€ {fatturatoLordo.toFixed(2)}</p>
+            </div>
+            <div className="bg-white p-6 rounded-3xl shadow border-l-4 border-l-red-400">
+              <p className="text-sm font-semibold text-slate-500">TASSE (su 78%)</p>
+              <p className="text-4xl font-black text-red-600 mt-2">€ {tasseDaPagare.toFixed(2)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-indigo-600 to-blue-700 p-6 rounded-3xl shadow text-white">
+              <p className="text-sm font-semibold text-indigo-100">UTILE NETTO</p>
+              <p className="text-4xl font-black mt-2">€ {utileNetto.toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Fatturazione({ user, db }) {
+      const [importo, setImporto] = useState('');
+      const [descrizione, setDescrizione] = useState('');
+
+      const salvaFattura = async () => {
+        if(!importo || !descrizione) return alert("Compila i campi");
+        await addDoc(collection(db, 'utenti', user.uid, 'fatture'), {
+          importo: Number(importo),
+          descrizione,
+          data: new Date().toISOString()
+        });
+        setImporto(''); setDescrizione('');
+        alert("Salvato!");
+      };
+
+      return (
+        <div className="bg-white p-8 rounded-3xl shadow border max-w-md mx-auto">
+          <h2 className="text-2xl font-bold mb-6">Registra Incasso</h2>
+          <div className="space-y-4">
+            <input type="number" value={importo} onChange={e=>setImporto(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="Importo €" />
+            <input type="text" value={descrizione} onChange={e=>setDescrizione(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="Paziente / Prestazione" />
+            <button onClick={salvaFattura} className="w-full bg-green-500 text-white font-bold py-4 rounded-xl">Salva</button>
+          </div>
+        </div>
+      );
+    }
+
+    function AdminPanel({ db }) {
+      const [utenti, setUtenti] = useState([]);
+
+      useEffect(() => {
+        const q = query(collection(db, 'utenti'));
+        const unsub = onSnapshot(q, snap => setUtenti(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+        return () => unsub();
+      }, [db]);
+
+      const toggleAbilitazione = async (id, stato) => {
+        await updateDoc(doc(db, 'utenti', id), { abilitato: !stato });
+      };
+
+      return (
+        <div className="bg-white p-8 rounded-3xl shadow border-t-8 border-yellow-400">
+          <h2 className="text-2xl font-black mb-6">Pannello Amministratore</h2>
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="p-4">Email Utente</th>
+                <th className="p-4">Stato</th>
+                <th className="p-4">Azione</th>
+              </tr>
+            </thead>
+            <tbody>
+              {utenti.map(u => (
+                <tr key={u.id} className="border-b">
+                  <td className="p-4 font-medium">{u.email}</td>
+                  <td className="p-4">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${u.abilitato ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {u.abilitato ? 'ATTIVO' : 'BLOCCATO'}
+                    </span>
+                  </td>
+                  <td className="p-4">
+                    {!u.admin && (
+                      <button onClick={() => toggleAbilitazione(u.id, u.abilitato)} className="text-sm bg-slate-200 px-3 py-1 rounded hover:bg-slate-300">
+                        {u.abilitato ? 'Blocca' : 'Sblocca'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

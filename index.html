@@ -1,178 +1,256 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MyNursApp Pro - Gestionale</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-    import { getFirestore, doc, getDoc, setDoc, collection } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-    
-    // Le tue chiavi esatte e funzionanti!
-    const firebaseConfig = {
-      apiKey: "AIzaSyCMCoT0DAq6KFgUHbMBJpJwvsom21WUuuA",
-      authDomain: "mynursapp-pro.firebaseapp.com",
-      projectId: "mynursapp-pro",
-      storageBucket: "mynursapp-pro.firebasestorage.app",
-      messagingSenderId: "39197762286",
-      appId: "1:39197762286:web:cf4707f13988b582a909ff"
-    };
-    
-    const app = initializeApp(firebaseConfig);
-    window.fAuth = { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut };
-    window.fDb = { getFirestore, doc, getDoc, setDoc };
-    window.fApp = app;
-  </script>
-</head>
-<body class="bg-slate-50">
-  <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect } = React;
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, addDoc, query, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 
-    function App() {
-      const [user, setUser] = useState(null);
-      const [profile, setProfile] = useState(null);
-      const [email, setEmail] = useState('');
-      const [pass, setPass] = useState('');
-      const [isLogin, setIsLogin] = useState(true); // True = Accedi, False = Registrati
-      const [errorMsg, setErrorMsg] = useState(''); // Il nostro rivelatore di errori
+// LE TUE NUOVE CHIAVI (Già inserite!)
+const firebaseConfig = {
+  apiKey: "AIzaSyBfsAtSpHSmg3LuOQFdgVl0Fb9-TG7SNTs",
+  authDomain: "mynursapp-definitiva.firebaseapp.com",
+  projectId: "mynursapp-definitiva",
+  storageBucket: "mynursapp-definitiva.firebasestorage.app",
+  messagingSenderId: "480040059911",
+  appId: "1:480040059911:web:106fe5873d20b3e2f256a2"
+};
 
-      useEffect(() => {
-        // Aspettiamo 1 secondo che Firebase si carichi dal modulo
-        setTimeout(() => {
-          if(!window.fAuth) {
-             setErrorMsg("Errore: Firebase non è riuscito a caricarsi. Controlla la tua connessione internet.");
-             return;
-          }
-          const auth = window.fAuth.getAuth(window.fApp);
-          const db = window.fDb.getFirestore(window.fApp);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-          window.fAuth.onAuthStateChanged(auth, async (u) => {
-            if (u) {
-              try {
-                const userDocRef = window.fDb.doc(db, 'utenti', u.uid);
-                const userDoc = await window.fDb.getDoc(userDocRef);
-                if (userDoc.exists()) {
-                  setProfile(userDoc.data());
-                  setUser(u);
-                } else {
-                  // Primo accesso in assoluto, creiamo il profilo bloccato
-                  const p = { email: u.email, abilitato: false, admin: false };
-                  await window.fDb.setDoc(userDocRef, p);
-                  setProfile(p);
-                  setUser(u);
-                }
-              } catch (err) {
-                setErrorMsg("Errore Database: " + err.message + ". Prova a ricaricare la pagina.");
-              }
-            } else {
-              setUser(null);
-            }
-          });
-        }, 1000);
-      }, []);
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [email, setEmail] = useState('');
+  const [pass, setPass] = useState('');
+  const [isLogin, setIsLogin] = useState(true);
+  const [view, setView] = useState('dashboard');
+  const [loading, setLoading] = useState(true);
 
-      const handleAuth = async () => {
-        setErrorMsg(''); // Pulisco gli errori vecchi
-        const auth = window.fAuth.getAuth(window.fApp);
+  // Auth Listener: Controlla chi entra e se è abilitato
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        // Controlla il profilo su Firestore
+        const docRef = doc(db, "utenti", currentUser.uid);
+        const docSnap = await getDoc(docRef);
         
-        try {
-          if (isLogin) {
-            await window.fAuth.signInWithEmailAndPassword(auth, email, pass);
-          } else {
-            await window.fAuth.createUserWithEmailAndPassword(auth, email, pass);
+        // Se sei tu, diventi ADMIN automaticamente
+        const isAdmin = currentUser.email === 'vincenzo.luminoso@gmail.com';
+
+        if (docSnap.exists()) {
+          let p = docSnap.data();
+          if (isAdmin && (!p.admin || !p.abilitato)) {
+             p.admin = true; p.abilitato = true;
+             await updateDoc(docRef, { admin: true, abilitato: true });
           }
-        } catch (e) {
-          console.error(e);
-          // TRADUCIAMO GLI ERRORI IN ITALIANO PER CAPIRE IL PROBLEMA!
-          if (e.code === 'auth/email-already-in-use') {
-            setErrorMsg("❌ Questa email è già registrata! Clicca sulla scritta blu in basso 'Hai già un account? Accedi' per fare il Login.");
-          } else if (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password') {
-            setErrorMsg("❌ Password sbagliata o account inesistente.");
-          } else if (e.code === 'auth/weak-password') {
-            setErrorMsg("❌ La password è troppo debole, deve avere almeno 6 caratteri.");
-          } else {
-            setErrorMsg("❌ Errore tecnico: " + e.message);
-          }
+          setProfile(p);
+        } else {
+          // Primo accesso: crea il profilo (disabilitato per i non-admin)
+          const newProfile = { email: currentUser.email, abilitato: isAdmin, admin: isAdmin };
+          await setDoc(docRef, newProfile);
+          setProfile(newProfile);
         }
-      };
+      } else {
+        setUser(null);
+        setProfile(null);
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-      if (!user) return (
-        <div className="min-h-screen flex items-center justify-center p-4">
-          <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100">
-            <h1 className="text-2xl font-bold mb-2 text-center text-indigo-900">MyNursApp Pro</h1>
-            <p className="text-center text-gray-500 mb-6 font-medium">{isLogin ? "Bentornato, fai l'accesso" : "Crea un nuovo account"}</p>
-            
-            {/* BOX DEGLI ERRORI IN ROSSO */}
-            {errorMsg && (
-              <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm font-bold shadow-sm">
-                {errorMsg}
-              </div>
-            )}
+  const handleAuth = async () => {
+    try {
+      if (isLogin) await signInWithEmailAndPassword(auth, email, pass);
+      else await createUserWithEmailAndPassword(auth, email, pass);
+    } catch (e) { alert("Errore: " + e.message); }
+  };
 
-            <input className="w-full border p-3 mb-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Email" onChange={e => setEmail(e.target.value)} />
-            <input className="w-full border p-3 mb-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" type="password" placeholder="Password" onChange={e => setPass(e.target.value)} />
-            
-            <button onClick={handleAuth} className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold shadow-md hover:bg-indigo-700 transition">
-              {isLogin ? "ACCEDI" : "REGISTRATI"}
-            </button>
-            
-            <button 
-              onClick={() => { setIsLogin(!isLogin); setErrorMsg(''); }} 
-              className="mt-6 w-full text-center text-sm font-bold text-indigo-600 hover:underline">
-              {isLogin ? "Non hai un account? Registrati qui" : "Hai già un account? Accedi qui"}
-            </button>
+  if (loading) return <div className="h-screen flex items-center justify-center text-xl font-bold text-indigo-600">Caricamento in corso...</div>;
+
+  // SCHERMATA DI LOGIN
+  if (!user) return (
+    <div className="min-h-screen flex items-center justify-center bg-indigo-50 p-4">
+      <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm">
+        <div className="text-center mb-8">
+          <span className="text-5xl mb-4 block">⚕️</span>
+          <h1 className="text-3xl font-black text-indigo-900">MyNursApp Pro</h1>
+          <p className="text-slate-500 font-medium mt-2">{isLogin ? "Accedi" : "Registrati"}</p>
+        </div>
+        <input className="w-full border p-3 mb-3 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Email" onChange={e => setEmail(e.target.value)} />
+        <input className="w-full border p-3 mb-6 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" type="password" placeholder="Password" onChange={e => setPass(e.target.value)} />
+        <button onClick={handleAuth} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl shadow-md hover:bg-indigo-700 transition">
+          {isLogin ? "ACCEDI" : "CREA ACCOUNT"}
+        </button>
+        <button onClick={() => setIsLogin(!isLogin)} className="w-full mt-4 text-sm text-indigo-600 font-semibold hover:underline">
+          {isLogin ? "Non hai un account? Registrati" : "Hai già un account? Accedi"}
+        </button>
+      </div>
+    </div>
+  );
+
+  // SCHERMATA DI ATTESA (Se non abilitato)
+  if (!profile?.abilitato) return (
+    <div className="h-screen flex items-center justify-center bg-gray-100 p-4 text-center">
+      <div className="bg-white p-8 rounded-xl shadow-lg max-w-sm">
+         <h2 className="text-2xl font-bold text-amber-600 mb-2">In Attesa</h2>
+         <p className="text-gray-600 mb-6">Il tuo account deve essere sbloccato dall'amministratore.</p>
+         <button onClick={() => signOut(auth)} className="text-indigo-600 font-bold underline">Esci</button>
+      </div>
+    </div>
+  );
+
+  // GESTIONALE PRINCIPALE
+  return (
+    <div className="flex h-screen bg-slate-100">
+      {/* Menu Laterale */}
+      <aside className="w-64 bg-indigo-900 text-white p-6 flex flex-col hide-on-print">
+        <h1 className="text-2xl font-black mb-1 flex items-center gap-2"><span className="text-3xl">⚕️</span> MyNursApp</h1>
+        <p className="text-indigo-300 text-xs mb-8 truncate">{user.email}</p>
+        <nav className="flex-1 space-y-2">
+          <NavBtn active={view === 'dashboard'} onClick={() => setView('dashboard')} icon="📊" text="Dashboard" />
+          <NavBtn active={view === 'pazienti'} onClick={() => setView('pazienti')} icon="🤝" text="Pazienti" />
+          <NavBtn active={view === 'calcolatore'} onClick={() => setView('calcolatore')} icon="🧮" text="Calcolatore" />
+          {profile.admin && <NavBtn active={view === 'admin'} onClick={() => setView('admin')} icon="👑" text="Admin" />}
+        </nav>
+        <button onClick={() => signOut(auth)} className="w-full text-left p-3 text-red-400 hover:bg-indigo-800 rounded-xl transition font-medium">🚪 Esci</button>
+      </aside>
+
+      {/* Contenuto */}
+      <main className="flex-1 p-8 overflow-y-auto">
+        {view === 'dashboard' && <Dashboard user={user} setView={setView} />}
+        {view === 'pazienti' && <Pazienti db={db} userId={user.uid} />}
+        {view === 'calcolatore' && <Calcolatore />}
+        {view === 'admin' && profile.admin && <AdminPanel db={db} />}
+      </main>
+
+      {/* CSS per la stampa */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .printable-area, .printable-area * { visibility: visible; }
+          .printable-area { position: absolute; left: 0; top: 0; width: 100%; }
+          .hide-on-print { display: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function NavBtn({ active, onClick, icon, text }) {
+  return (
+    <button onClick={onClick} className={`w-full text-left px-4 py-3 rounded-xl transition flex items-center gap-3 font-medium ${active ? 'bg-indigo-700 text-white' : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'}`}>
+      <span className="text-xl">{icon}</span> {text}
+    </button>
+  );
+}
+
+// --- COMPONENTI DELLE PAGINE ---
+
+function Dashboard({ user, setView }) {
+  return (
+    <div>
+      <h2 className="text-3xl font-black text-slate-800 mb-2">Benvenuta! 👋</h2>
+      <p className="text-slate-500 mb-8">Riepilogo della tua attività.</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div onClick={() => setView('pazienti')} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition">
+          <div className="text-4xl mb-4">🤝</div>
+          <h3 className="text-xl font-bold">I Miei Pazienti</h3>
+          <p className="text-slate-500 text-sm">Gestisci l'anagrafica e le cartelle.</p>
+        </div>
+        <div onClick={() => setView('calcolatore')} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition">
+          <div className="text-4xl mb-4">💶</div>
+          <h3 className="text-xl font-bold">Fatturazione</h3>
+          <p className="text-slate-500 text-sm">Calcola lordo/netto ed esporta in PDF.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Pazienti({ db, userId }) {
+  const [pazienti, setPazienti] = useState([]);
+  const [nome, setNome] = useState('');
+
+  // Sincronizzazione in tempo reale
+  useEffect(() => {
+    const q = query(collection(db, "users", userId, "pazienti"));
+    return onSnapshot(q, (snap) => setPazienti(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }, [db, userId]);
+
+  const aggiungi = async (e) => {
+    e.preventDefault();
+    if(!nome.trim()) return;
+    await addDoc(collection(db, "users", userId, "pazienti"), { nome, data: new Date().toISOString() });
+    setNome('');
+  };
+
+  return (
+    <div className="max-w-3xl">
+      <h2 className="text-3xl font-black mb-6">Pazienti</h2>
+      <form onSubmit={aggiungi} className="flex gap-4 mb-8">
+        <input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Nome e Cognome Paziente" className="flex-1 px-4 py-3 border rounded-xl" />
+        <button type="submit" className="bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700">Aggiungi</button>
+      </form>
+      <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+        {pazienti.length === 0 ? <div className="p-6 text-center text-gray-500">Nessun paziente.</div> : (
+          <ul className="divide-y">
+            {pazienti.map(p => <li key={p.id} className="p-4 font-medium">{p.nome}</li>)}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Calcolatore() {
+  const [prezzoBase, setPrezzoBase] = useState(30);
+  const [km, setKm] = useState(0);
+  const [tasse, setTasse] = useState(5);
+  
+  const totaleKm = km * 0.40;
+  const enpapi = prezzoBase * 0.04;
+  const lordo = prezzoBase + enpapi + totaleKm;
+  const netto = lordo - ((lordo * 0.78) * (tasse/100)) - enpapi;
+
+  return (
+    <div className="max-w-4xl flex gap-8">
+      <div className="flex-1 bg-white p-6 rounded-3xl shadow-sm border hide-on-print">
+        <h2 className="text-2xl font-black mb-6">🧮 Calcolatore Forfettario</h2>
+        <div className="space-y-4">
+          <div><label className="text-sm font-bold block mb-1">Compenso (€)</label><input type="number" value={prezzoBase} onChange={e=>setPrezzoBase(Number(e.target.value))} className="w-full p-2 border rounded-xl text-lg font-bold" /></div>
+          <div><label className="text-sm font-bold block mb-1">Km Trasferta</label><input type="number" value={km} onChange={e=>setKm(Number(e.target.value))} className="w-full p-2 border rounded-xl text-lg" /></div>
+          <div className="flex gap-4 pt-4 border-t">
+            <label><input type="radio" checked={tasse===5} onChange={()=>setTasse(5)} className="mr-2"/>5% (Nuova)</label>
+            <label><input type="radio" checked={tasse===15} onChange={()=>setTasse(15)} className="mr-2"/>15% (Std)</label>
           </div>
         </div>
-      );
+        <button onClick={() => window.print()} className="w-full mt-8 bg-emerald-500 text-white font-bold py-3 rounded-xl shadow-md">Stampa Ricevuta PDF</button>
+      </div>
 
-      if (!profile?.abilitato && !profile?.admin) return (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
-           <div className="bg-white p-8 rounded-2xl shadow-lg max-w-md">
-              <h2 className="text-2xl font-bold text-amber-600 mb-4">Account in Revisione</h2>
-              <p className="text-gray-700 mb-6">Il tuo account è stato creato con successo! Sei in attesa di approvazione dall'amministratore.</p>
-              <button onClick={() => window.fAuth.signOut(window.fAuth.getAuth(window.fApp))} className="text-red-500 font-bold underline">Esci</button>
-           </div>
+      <div className="w-96 bg-white p-8 rounded-3xl shadow-sm border printable-area">
+        <h1 className="text-2xl font-black border-b-2 border-black pb-2 mb-6">RICEVUTA</h1>
+        <p className="mb-4"><strong>Prestazione:</strong> € {prezzoBase.toFixed(2)}</p>
+        <p className="mb-4 text-gray-600">ENPAPI (4%): € {enpapi.toFixed(2)}</p>
+        {km > 0 && <p className="mb-4 text-gray-600">Rimborso {km}Km: € {totaleKm.toFixed(2)}</p>}
+        <div className="border-t-2 border-black pt-4 mt-6 flex justify-between font-bold text-xl">
+          <span>TOTALE</span><span>€ {lordo.toFixed(2)}</span>
         </div>
-      );
-
-      return (
-        <div className="p-4 max-w-4xl mx-auto mt-6">
-          <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 flex justify-between items-center mb-6">
-            <div>
-               <h1 className="text-2xl font-black text-indigo-900">Dashboard</h1>
-               <p className="text-sm text-gray-500">{user.email}</p>
-            </div>
-            <button onClick={() => window.fAuth.signOut(window.fAuth.getAuth(window.fApp))} className="text-red-500 font-bold px-4 py-2 hover:bg-red-50 rounded-lg">ESCI</button>
-          </div>
-
-          {profile.admin && (
-            <div className="bg-amber-100 p-6 rounded-2xl border border-amber-300 mb-6 shadow-sm">
-              <h2 className="font-bold text-amber-900 text-lg">👑 PANNELLO AMMINISTRATORE</h2>
-              <p className="text-amber-800 text-sm mt-1">Solo tu vedi questo riquadro. Vai su Firebase per abilitare i tuoi clienti.</p>
-            </div>
-          )}
-
-          <div className="grid md:grid-cols-2 gap-6">
-             <div className="bg-indigo-600 text-white p-8 rounded-3xl shadow-xl">
-                <h2 className="text-xl font-bold mb-2">Fatturazione Veloce</h2>
-                <p className="text-indigo-200 text-sm mb-6">Calcolo forfettario sul 78% di redditività</p>
-                <div className="bg-white/10 p-4 rounded-xl">
-                   <p className="font-bold text-center">Strumento di calcolo in arrivo...</p>
-                </div>
-             </div>
-          </div>
+        <div className="mt-8 text-xs text-gray-400 text-center hide-on-print border-t pt-4">
+          Guadagno netto stimato in tasca: <strong className="text-emerald-500 text-lg">€ {netto.toFixed(2)}</strong>
         </div>
-      );
-    }
+      </div>
+    </div>
+  );
+}
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
-</html>
+function AdminPanel({ db }) {
+  // Semplice placeholder per l'admin
+  return (
+    <div>
+      <h2 className="text-3xl font-black mb-4">👑 Admin</h2>
+      <p>Qui potrai gestire gli utenti (in arrivo).</p>
+    </div>
+  );
+}

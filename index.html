@@ -53,8 +53,6 @@
             const [view, setView] = React.useState('dashboard');
             const [userSettings, setUserSettings] = React.useState({ costoKm: 0.40 });
             const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
-
-            // Stato per gestire il testo del costo Km con la virgola
             const [costoText, setCostoText] = React.useState('0.40');
 
             React.useEffect(() => {
@@ -90,14 +88,10 @@
                 return () => unsubscribe();
             }, []);
 
-            // Funzione magica per convertire la virgola in punto
             const handleCostoChange = (val) => {
-                setCostoText(val); // Mostra quello che l'utente scrive (anche con la virgola)
-                
-                // Converte virgola in punto per il database
+                setCostoText(val); 
                 let cleanVal = val.replace(',', '.');
                 let num = parseFloat(cleanVal);
-                
                 if (!isNaN(num)) {
                     db.collection('utenti').doc(user.uid).update({ costoKm: num });
                     setUserSettings({ costoKm: num });
@@ -117,9 +111,7 @@
                 <div className="flex h-screen flex-col md:flex-row">
                     <div className="md:hidden bg-indigo-900 text-white p-4 flex justify-between items-center no-print shadow-md z-40">
                         <h1 className="font-black text-xl text-emerald-400">⚕️ MyDoctorApp</h1>
-                        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-3xl p-1 focus:outline-none">
-                            {isSidebarOpen ? '✕' : '☰'}
-                        </button>
+                        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-3xl p-1 focus:outline-none">{isSidebarOpen ? '✕' : '☰'}</button>
                     </div>
 
                     {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-40 no-print"></div>}
@@ -140,7 +132,6 @@
                             
                             <div className="mt-8 pt-4 border-t border-indigo-800">
                                 <label className="text-xs text-indigo-300 mb-1 block">Tuo Rimborso Km (€)</label>
-                                {/* InputMode decimal apre il tastierino con la virgola su iPhone */}
                                 <input type="text" inputMode="decimal" value={costoText} onChange={(e) => handleCostoChange(e.target.value)} className="w-full bg-indigo-800 text-white px-3 py-2 rounded text-sm outline-none" />
                             </div>
                         </nav>
@@ -254,7 +245,7 @@
         function Listino({ userId }) {
             const [servizi, setServizi] = React.useState([]);
             const [nome, setNome] = React.useState('');
-            const [prezzo, setPrezzo] = React.useState('');
+            const [prezzoTesto, setPrezzoTesto] = React.useState('');
 
             React.useEffect(() => {
                 return db.collection('listino').where('userId', '==', userId).onSnapshot(snap => {
@@ -266,8 +257,10 @@
 
             const aggiungi = async (e) => {
                 e.preventDefault();
-                await db.collection('listino').add({ userId, nome, prezzo: Number(prezzo.replace(',','.')) });
-                setNome(''); setPrezzo('');
+                let p = parseFloat(prezzoTesto.replace(',', '.'));
+                if(isNaN(p)) return;
+                await db.collection('listino').add({ userId, nome, prezzo: p });
+                setNome(''); setPrezzoTesto('');
             };
 
             const elimina = async (id) => await db.collection('listino').doc(id).delete();
@@ -277,7 +270,7 @@
                     <h2 className="text-2xl md:text-3xl font-black mb-2">📋 Il Mio Listino</h2>
                     <form onSubmit={aggiungi} className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-sm border mb-6 flex flex-col md:flex-row gap-3">
                         <input required value={nome} onChange={e=>setNome(e.target.value)} placeholder="Es: Visita Specialistica" className="flex-1 px-4 py-3 border rounded-xl" />
-                        <input required type="text" inputMode="decimal" value={prezzo} onChange={e=>setPrezzo(e.target.value)} placeholder="Prezzo €" className="w-full md:w-32 px-4 py-3 border rounded-xl" />
+                        <input required type="text" inputMode="decimal" value={prezzoTesto} onChange={e=>setPrezzoTesto(e.target.value)} placeholder="Prezzo €" className="w-full md:w-32 px-4 py-3 border rounded-xl" />
                         <button type="submit" className="bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl">Aggiungi</button>
                     </form>
                     <div className="bg-white rounded-2xl md:rounded-3xl shadow-sm border overflow-hidden">
@@ -307,7 +300,6 @@
             const [pazienteObj, setPazienteObj] = React.useState({id: '', nome: ''});
             const [prestazione, setPrestazione] = React.useState('');
             
-            // Usiamo state separati per permettere la digitazione con la virgola
             const [compensoTesto, setCompensoTesto] = React.useState('');
             const [kmTesto, setKmTesto] = React.useState('');
             
@@ -343,7 +335,6 @@
                 }
             };
 
-            // Conversione sicura per i calcoli matematici
             const compensoNumero = parseFloat(compensoTesto.replace(',', '.')) || 0;
             const kmNumero = parseFloat(kmTesto.replace(',', '.')) || 0;
 
@@ -358,7 +349,6 @@
 
             const bollo = applicaBollo ? 2.00 : 0;
             const totaleDaPagare = imponibileFattura + bollo;
-            
             const imponibileTasse = imponibileFattura * 0.78; 
             const importoTasse = imponibileTasse * (tasse / 100);
             const netto = imponibileFattura - importoTasse - cassaPrev;
@@ -510,25 +500,57 @@
             );
         }
 
-        // --- GEMINI AI VERA (CHIAVE INTEGRATA INVISIBILE) ---
+        // --- GEMINI AI VERA CON MODELLO AGGIORNATO ---
         function AssistenteAI() {
+            const [savedKey, setSavedKey] = React.useState(localStorage.getItem('my_gemini_key_pro') || '');
+            const [tempKey, setTempKey] = React.useState('');
+            
             const [input, setInput] = React.useState('');
-            const [chat, setChat] = React.useState([{role: 'model', test: 'Ciao! Sono MyDoctor AI, il tuo assistente clinico avanzato. Fammi una domanda su diagnosi, farmaci o procedure!'}]);
+            const [chat, setChat] = React.useState([{role: 'model', test: 'Ciao! Sono MyDoctor AI. Fammi una domanda clinica!'}]);
             const [loading, setLoading] = React.useState(false);
+
+            if (!savedKey) {
+                return (
+                    <div className="max-w-4xl mx-auto h-[85vh] flex flex-col items-center justify-center bg-white rounded-3xl shadow-sm border p-6 text-center">
+                        <span className="text-6xl mb-4">🤖</span>
+                        <h2 className="text-2xl font-black mb-2 text-indigo-900">Configura MyDoctor AI</h2>
+                        <p className="mb-6 text-slate-500 text-sm max-w-md">Per motivi di sicurezza, la tua chiave segreta non verrà salvata su internet, ma solo nella <b>memoria del tuo dispositivo</b>.</p>
+                        
+                        <input 
+                            type="password" 
+                            placeholder="Incolla qui la chiave (inizia con AIza...)" 
+                            className="w-full max-w-md p-4 border rounded-xl mb-4 bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500" 
+                            value={tempKey} 
+                            onChange={e=>setTempKey(e.target.value)} 
+                        />
+                        <button 
+                            onClick={() => {
+                                if(tempKey.length > 10) {
+                                    localStorage.setItem('my_gemini_key_pro', tempKey.trim());
+                                    setSavedKey(tempKey.trim());
+                                } else {
+                                    alert("Inserisci una chiave valida.");
+                                }
+                            }} 
+                            className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg w-full max-w-md"
+                        >
+                            Salva Chiave e Inizia
+                        </button>
+                    </div>
+                );
+            }
 
             const askGemini = async () => {
                 if(!input.trim()) return;
                 
-                // La tua chiave esatta mascherata
-                const myKey = "AQ.Ab8RN6K" + "-qJnzopGdyk" + "eZ6BXak6IJ91qN" + "r0esRP27ZZT8uNld7g";
-
                 const msg = input;
                 setChat(prev => [...prev, {role: 'user', text: msg}]);
                 setInput('');
                 setLoading(true);
 
                 try {
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${myKey}`;
+                    // QUI HO AGGIORNATO IL MODELLO A gemini-1.5-flash-latest COME CHIESTO DA GOOGLE
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${savedKey}`;
                     const payload = {
                         contents: [{ parts: [{ text: "Sei un assistente per un Medico professionista in Italia. Rispondi in modo conciso e clinico. Domanda: " + msg }] }]
                     };
@@ -543,7 +565,13 @@
                     const reply = result.candidates[0].content.parts[0].text;
                     setChat(prev => [...prev, {role: 'model', text: reply}]);
                 } catch(e) {
-                    setChat(prev => [...prev, {role: 'model', text: 'Errore di connessione. Riprova più tardi.'}]);
+                    if (e.message.includes("API key not valid")) {
+                        localStorage.removeItem('my_gemini_key_pro');
+                        setSavedKey('');
+                        alert("La chiave inserita non è valida o è scaduta. Inseriscila di nuovo.");
+                    } else {
+                        setChat(prev => [...prev, {role: 'model', text: 'Errore API: ' + e.message}]);
+                    }
                 } finally {
                     setLoading(false);
                 }
@@ -551,9 +579,12 @@
 
             return (
                 <div className="max-w-4xl mx-auto h-[85vh] flex flex-col bg-white rounded-3xl shadow-sm border overflow-hidden">
-                    <div className="bg-indigo-900 text-white p-4 flex items-center gap-3">
-                        <span className="text-3xl">🤖</span>
-                        <div><h2 className="font-bold text-lg">MyDoctor AI</h2><p className="text-xs text-indigo-300">Intelligenza Artificiale Attiva</p></div>
+                    <div className="bg-indigo-900 text-white p-4 flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <span className="text-3xl">🤖</span>
+                            <div><h2 className="font-bold text-lg">MyDoctor AI</h2><p className="text-xs text-indigo-300">Intelligenza Artificiale Attiva</p></div>
+                        </div>
+                        <button onClick={() => { localStorage.removeItem('my_gemini_key_pro'); setSavedKey(''); }} className="text-xs bg-indigo-800 px-3 py-1 rounded text-indigo-200 hover:bg-indigo-700">Cambia Chiave</button>
                     </div>
 
                     <div className="flex-1 p-4 overflow-y-auto bg-slate-50 flex flex-col gap-4">
@@ -566,14 +597,14 @@
                     </div>
                     
                     <div className="p-3 md:p-4 bg-white border-t flex gap-2">
-                        <input value={input} onChange={e=>setInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && askGemini()} placeholder="Scrivi sintomo, diagnosi, dosaggio..." className="flex-1 px-4 py-3 bg-slate-100 border rounded-xl outline-none" />
+                        <input value={input} onChange={e=>setInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && askGemini()} placeholder="Scrivi un sintomo, dosaggio..." className="flex-1 px-4 py-3 bg-slate-100 border rounded-xl outline-none" />
                         <button onClick={askGemini} className="bg-indigo-600 text-white px-4 md:px-6 py-3 rounded-xl font-bold">Invia</button>
                     </div>
                 </div>
             );
         }
 
-        function Dashboard({setView}) { return (<div className="max-w-4xl mx-auto"><h2 className="text-2xl md:text-3xl font-black mb-6">Benvenuto in MyDoctorApp! 👋</h2><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div onClick={()=>setView('listino')} className="bg-white p-6 rounded-3xl border cursor-pointer"><div className="text-4xl mb-3">📋</div><h3 className="font-bold text-lg">Il Mio Listino</h3></div><div onClick={()=>setView('calcolatore')} className="bg-white p-6 rounded-3xl border cursor-pointer"><div className="text-4xl mb-3">🧮</div><h3 className="font-bold text-lg">Fatturazione Veloce</h3></div></div></div>); }
+        function Dashboard({setView}) { return (<div className="max-w-4xl mx-auto"><h2 className="text-2xl md:text-3xl font-black mb-6">Benvenuto in MyDoctorApp! 👋</h2><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div onClick={()=>setView('listino')} className="bg-white p-6 rounded-3xl border cursor-pointer hover:shadow-md"><div className="text-4xl mb-3">📋</div><h3 className="font-bold text-lg">Il Mio Listino</h3></div><div onClick={()=>setView('calcolatore')} className="bg-white p-6 rounded-3xl border cursor-pointer hover:shadow-md"><div className="text-4xl mb-3">🧮</div><h3 className="font-bold text-lg">Fatturazione Veloce</h3></div></div></div>); }
         function AdminPanel() { return <div className="text-center p-8"><h2 className="text-3xl font-black mb-4">👑 Pannello Admin</h2><p>Le funzioni Admin sono attive.</p></div>; }
         function InAttesa({auth}) { return <div className="h-screen flex items-center justify-center p-4"><div className="bg-white p-8 rounded-xl shadow-lg text-center"><h2 className="text-2xl font-bold text-amber-600">In Attesa</h2><button onClick={()=>auth.signOut()} className="underline mt-4 text-indigo-600">Esci</button></div></div>; }
         function LoginScreen() { 

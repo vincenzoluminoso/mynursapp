@@ -43,7 +43,7 @@
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
-        const ADMIN_EMAILS = ['leperemariarosaria@gmail.com', 'vincenzo.luminoso@gmail.com'];
+        const ADMIN_EMAILS = ['vincenzo.luminoso@gmail.com'];
 
         // --- APP PRINCIPALE ---
         function App() {
@@ -127,7 +127,7 @@
                             <MenuBtn v='listino' curr={view} set={cambiaVista} icon="📋" text="Il Mio Listino" />
                             <MenuBtn v='calcolatore' curr={view} set={cambiaVista} icon="🧮" text="Fatturazione PDF" />
                             <MenuBtn v='spese' curr={view} set={cambiaVista} icon="📉" text="Gestione Spese" />
-                            <MenuBtn v='ai' curr={view} set={cambiaVista} icon="🤖" text="MyDoctor AI" />
+                            <MenuBtn v='messaggi' curr={view} set={cambiaVista} icon="💬" text="Messaggi e Condivisione" />
                             {profile.admin && <MenuBtn v='admin' curr={view} set={cambiaVista} icon="👑" text="Pannello Admin" color="text-amber-300" />}
                             
                             <div className="mt-8 pt-4 border-t border-indigo-800">
@@ -142,11 +142,11 @@
 
                     <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-100 relative h-full">
                         {view === 'dashboard' && <Dashboard setView={cambiaVista} />}
-                        {view === 'pazienti' && <Pazienti userId={user.uid} />}
+                        {view === 'pazienti' && <Pazienti userId={user.uid} userEmail={user.email} />}
                         {view === 'listino' && <Listino userId={user.uid} />}
                         {view === 'calcolatore' && <Calcolatore userId={user.uid} costoKmBase={userSettings.costoKm} setView={cambiaVista} />}
                         {view === 'spese' && <Spese userId={user.uid} />}
-                        {view === 'ai' && <AssistenteAI />}
+                        {view === 'messaggi' && <Messaggistica user={user} />}
                         {view === 'admin' && profile.admin && <AdminPanel />}
                     </main>
                 </div>
@@ -162,52 +162,136 @@
         }
 
         // --- PAZIENTI ---
-        function Pazienti({ userId }) {
+        function Pazienti({ userId, userEmail }) {
             const [pazienti, setPazienti] = React.useState([]);
             const [nome, setNome] = React.useState('');
             const [pazienteAttivo, setPazienteAttivo] = React.useState(null);
+            
+            // Per la condivisione
+            const [colleghi, setColleghi] = React.useState([]);
+            const [showShareModal, setShowShareModal] = React.useState(false);
+            const [selectedPazienteToShare, setSelectedPazienteToShare] = React.useState(null);
 
             React.useEffect(() => {
-                return db.collection('pazienti').where('infermiereId', '==', userId).onSnapshot(snap => {
-                    const l = []; snap.forEach(doc => l.push({ id: doc.id, ...doc.data() })); 
-                    l.sort((a,b) => a.nome.localeCompare(b.nome));
-                    setPazienti(l);
-                });
-            }, [userId]);
+                // Modifica per permettere ai pazienti di essere condivisi: cerchiamo sia quelli creati che quelli in cui si ha accesso
+                return db.collection('pazienti')
+                    .where('accessList', 'array-contains', userEmail)
+                    .onSnapshot(snap => {
+                        const l = []; snap.forEach(doc => l.push({ id: doc.id, ...doc.data() })); 
+                        l.sort((a,b) => a.nome.localeCompare(b.nome));
+                        setPazienti(l);
+                    });
+            }, [userEmail]);
+
+            React.useEffect(() => {
+                // Carica la lista degli altri utenti per poter condividere
+                return db.collection('utenti').onSnapshot(snap => {
+                    const l = []; snap.forEach(d => {
+                        if(d.data().email !== userEmail) {
+                            l.push(d.data().email);
+                        }
+                    });
+                    setColleghi(l);
+                })
+            }, [userEmail]);
 
             const aggiungiPaziente = async (e) => {
                 e.preventDefault();
                 if(!nome.trim()) return;
-                await db.collection('pazienti').add({ nome, infermiereId: userId });
+                await db.collection('pazienti').add({ 
+                    nome, 
+                    infermiereId: userId, 
+                    creatorEmail: userEmail,
+                    accessList: [userEmail] // Chi crea ha sempre l'accesso
+                });
                 setNome('');
             };
 
-            if (pazienteAttivo) return <CartellaPaziente paziente={pazienteAttivo} torna={() => setPazienteAttivo(null)} userId={userId} />;
+            const openShareModal = (p, e) => {
+                e.stopPropagation(); // Evita di aprire la cartella clinica
+                setSelectedPazienteToShare(p);
+                setShowShareModal(true);
+            };
+
+            const sharePaziente = async (emailToShare) => {
+                if(!selectedPazienteToShare) return;
+                
+                try {
+                     await db.collection('pazienti').doc(selectedPazienteToShare.id).update({
+                        accessList: firebase.firestore.FieldValue.arrayUnion(emailToShare)
+                    });
+                    alert(`Accesso condiviso con ${emailToShare}`);
+                    setShowShareModal(false);
+                } catch(err) {
+                    alert("Errore nella condivisione.");
+                }
+            };
+
+            if (pazienteAttivo) return <CartellaPaziente paziente={pazienteAttivo} torna={() => setPazienteAttivo(null)} userId={userId} userEmail={userEmail} />;
 
             return (
-                <div className="max-w-4xl mx-auto pb-10">
+                <div className="max-w-4xl mx-auto pb-10 relative">
                     <h2 className="text-2xl md:text-3xl font-black mb-2">🤝 Archivio Pazienti</h2>
                     <form onSubmit={aggiungiPaziente} className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-sm border mb-6 flex flex-col md:flex-row gap-3">
                         <input required value={nome} onChange={e=>setNome(e.target.value)} placeholder="Nome e Cognome Paziente" className="flex-1 px-4 py-3 border rounded-xl" />
                         <button type="submit" className="bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl">Crea Cartella</button>
                     </form>
                     <div className="bg-white rounded-2xl md:rounded-3xl shadow-sm border overflow-hidden">
-                        {pazienti.length === 0 ? <p className="p-8 text-center text-slate-500">Nessun paziente.</p> : 
+                        {pazienti.length === 0 ? <p className="p-8 text-center text-slate-500">Nessun paziente. Puoi crearne uno o aspettare che un collega condivida i dati con te.</p> : 
                             <ul className="divide-y">
                                 {pazienti.map(p => (
-                                    <li key={p.id} onClick={() => setPazienteAttivo(p)} className="p-4 hover:bg-slate-50 flex justify-between items-center cursor-pointer">
-                                        <p className="font-bold text-lg">{p.nome}</p>
-                                        <span className="text-indigo-600 bg-indigo-50 px-3 py-1 md:px-4 md:py-2 rounded-lg text-sm font-bold">Apri Cartella ➔</span>
+                                    <li key={p.id} onClick={() => setPazienteAttivo(p)} className="p-4 hover:bg-slate-50 flex flex-col md:flex-row md:justify-between md:items-center cursor-pointer gap-4">
+                                        <div>
+                                            <p className="font-bold text-lg flex items-center gap-2">
+                                                {p.nome} 
+                                                {p.creatorEmail !== userEmail && <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">Condiviso</span>}
+                                            </p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {p.creatorEmail === userEmail && (
+                                                <button onClick={(e) => openShareModal(p, e)} className="text-indigo-600 bg-indigo-50 border border-indigo-200 px-3 py-1 md:px-4 md:py-2 rounded-lg text-sm font-bold">Condividi 🔗</button>
+                                            )}
+                                            <span className="text-white bg-indigo-600 px-3 py-1 md:px-4 md:py-2 rounded-lg text-sm font-bold">Apri Cartella ➔</span>
+                                        </div>
                                     </li>
                                 ))}
                             </ul>
                         }
                     </div>
+
+                    {/* MODAL CONDIVISIONE */}
+                    {showShareModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl">
+                                <h3 className="text-xl font-bold mb-4">Condividi {selectedPazienteToShare?.nome}</h3>
+                                <p className="text-sm text-slate-500 mb-4">Seleziona il collega con cui condividere la cartella clinica.</p>
+                                
+                                <div className="max-h-60 overflow-y-auto mb-4 border rounded-xl divide-y">
+                                    {colleghi.length === 0 && <p className="p-4 text-center text-sm">Nessun collega registrato.</p>}
+                                    {colleghi.map(email => {
+                                        const isAlreadyShared = selectedPazienteToShare?.accessList?.includes(email);
+                                        return (
+                                            <div key={email} className="flex justify-between items-center p-3 hover:bg-slate-50">
+                                                <span className="text-sm truncate mr-2">{email}</span>
+                                                {isAlreadyShared ? (
+                                                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">Accesso Attivo</span>
+                                                ) : (
+                                                    <button onClick={() => sharePaziente(email)} className="text-xs bg-indigo-600 text-white px-3 py-1 rounded font-bold">Concedi Accesso</button>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                                
+                                <button onClick={() => setShowShareModal(false)} className="w-full bg-slate-200 text-slate-800 font-bold py-3 rounded-xl">Chiudi</button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
 
-        function CartellaPaziente({ paziente, torna, userId }) {
+        function CartellaPaziente({ paziente, torna, userId, userEmail }) {
             const [prestazioni, setPrestazioni] = React.useState([]);
 
             React.useEffect(() => {
@@ -222,21 +306,144 @@
                 <div className="max-w-4xl mx-auto pb-10">
                     <button onClick={torna} className="mb-4 text-indigo-600 font-bold bg-indigo-50 px-4 py-2 rounded-lg">⬅ Torna ai pazienti</button>
                     <div className="bg-indigo-900 text-white p-6 rounded-3xl shadow-sm mb-6">
-                        <h2 className="text-2xl font-black">Cartella Clinica</h2>
-                        <p className="text-emerald-400 text-xl font-bold">{paziente.nome}</p>
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <h2 className="text-2xl font-black">Cartella Clinica</h2>
+                                <p className="text-emerald-400 text-xl font-bold">{paziente.nome}</p>
+                            </div>
+                            {paziente.creatorEmail !== userEmail && <span className="bg-amber-400 text-amber-900 text-xs font-bold px-2 py-1 rounded-full">Dati Condivisi</span>}
+                        </div>
+                        <p className="text-xs text-indigo-300 mt-2">Visibile agli utenti autorizzati per la collaborazione clinica.</p>
                     </div>
+                    
+                    <h3 className="font-bold text-lg mb-3">Storico Interventi/Prestazioni</h3>
                     <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
                         {prestazioni.length === 0 ? <p className="p-6 text-center text-slate-500">Nessuna prestazione salvata. Salvale dal Calcolatore Fatture.</p> :
                             <ul className="divide-y">
                                 {prestazioni.map(p => (
                                     <li key={p.id} className="p-4 flex flex-col md:flex-row md:justify-between md:items-center gap-2">
-                                        <div><p className="font-bold text-lg">{p.desc}</p><p className="text-xs text-slate-500">{p.data}</p></div>
+                                        <div>
+                                            <p className="font-bold text-lg">{p.desc}</p>
+                                            <div className="flex gap-2 items-center">
+                                                <p className="text-xs text-slate-500">{p.data}</p>
+                                                <p className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Inserito da: {p.creatorEmail || "Sconosciuto"}</p>
+                                            </div>
+                                        </div>
                                         <p className="font-black text-emerald-600 bg-emerald-50 px-3 py-1 rounded w-fit">€ {Number(p.importo).toFixed(2)}</p>
                                     </li>
                                 ))}
                             </ul>
                         }
                     </div>
+                </div>
+            );
+        }
+
+        // --- MESSAGGISTICA TRA COLLEGHI ---
+        function Messaggistica({ user }) {
+            const [colleghi, setColleghi] = React.useState([]);
+            const [selectedUser, setSelectedUser] = React.useState(null);
+            
+            React.useEffect(() => {
+                // Carica tutti gli utenti attivi
+                return db.collection('utenti').where('abilitato', '==', true).onSnapshot(snap => {
+                    const l = []; 
+                    snap.forEach(d => {
+                        if(d.data().email !== user.email) l.push({uid: d.id, ...d.data()});
+                    });
+                    setColleghi(l);
+                });
+            }, [user.email]);
+
+            if (selectedUser) {
+                return <ChatPrivata currentEmail={user.email} colleague={selectedUser} torna={() => setSelectedUser(null)} />;
+            }
+
+            return (
+                <div className="max-w-4xl mx-auto pb-10">
+                    <h2 className="text-2xl md:text-3xl font-black mb-2">💬 Messaggi e Collaborazioni</h2>
+                    <p className="text-slate-500 mb-6 text-sm">Seleziona un collega medico o infermiere per comunicare in modo sicuro.</p>
+                    
+                    <div className="bg-white rounded-2xl md:rounded-3xl shadow-sm border overflow-hidden">
+                        {colleghi.length === 0 ? <p className="p-8 text-center text-slate-500">Nessun collega abilitato al momento.</p> :
+                            <ul className="divide-y">
+                                {colleghi.map(c => (
+                                    <li key={c.uid} onClick={() => setSelectedUser(c)} className="p-4 hover:bg-slate-50 flex justify-between items-center cursor-pointer">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-lg">
+                                                {c.email.charAt(0).toUpperCase()}
+                                            </div>
+                                            <span className="font-bold">{c.email}</span>
+                                        </div>
+                                        <span className="text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg text-sm font-bold">Invia Messaggio ➔</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        }
+                    </div>
+                </div>
+            );
+        }
+
+        function ChatPrivata({ currentEmail, colleague, torna }) {
+            const [messaggi, setMessaggi] = React.useState([]);
+            const [testo, setTesto] = React.useState('');
+            
+            // Crea un ID univoco per la chatroom basato sulle due email in ordine alfabetico
+            const chatId = [currentEmail, colleague.email].sort().join('_');
+
+            React.useEffect(() => {
+                return db.collection('chats').doc(chatId).collection('messaggi')
+                    .orderBy('timestamp', 'asc')
+                    .onSnapshot(snap => {
+                        const l = [];
+                        snap.forEach(doc => l.push({id: doc.id, ...doc.data()}));
+                        setMessaggi(l);
+                    });
+            }, [chatId]);
+
+            const invia = async (e) => {
+                e.preventDefault();
+                if(!testo.trim()) return;
+                
+                await db.collection('chats').doc(chatId).collection('messaggi').add({
+                    testo: testo.trim(),
+                    mittente: currentEmail,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                setTesto('');
+            };
+
+            return (
+                <div className="max-w-4xl mx-auto h-[85vh] flex flex-col bg-white rounded-3xl shadow-sm border overflow-hidden relative">
+                    <div className="bg-indigo-900 text-white p-4 flex items-center gap-3 shadow-md z-10">
+                        <button onClick={torna} className="text-xl p-2 bg-indigo-800 rounded-lg mr-2">⬅</button>
+                        <div className="w-10 h-10 bg-emerald-400 text-emerald-900 rounded-full flex items-center justify-center font-bold text-lg">
+                            {colleague.email.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                            <h2 className="font-bold">{colleague.email}</h2>
+                            <p className="text-xs text-indigo-300">Rete Clinica MyDoctorApp</p>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 p-4 overflow-y-auto bg-slate-50 flex flex-col gap-4">
+                        {messaggi.length === 0 && <p className="text-center text-slate-400 mt-10">Inizia la conversazione clinica. I messaggi sono crittografati e sicuri.</p>}
+                        
+                        {messaggi.map((m, i) => {
+                            const isMe = m.mittente === currentEmail;
+                            return (
+                                <div key={m.id || i} className={`max-w-[75%] rounded-2xl p-3 ${isMe ? 'bg-indigo-600 text-white self-end rounded-br-none' : 'bg-slate-200 text-slate-800 self-start rounded-bl-none'}`}>
+                                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{m.testo}</p>
+                                </div>
+                            )
+                        })}
+                    </div>
+                    
+                    <form onSubmit={invia} className="p-3 bg-white border-t flex gap-2">
+                        <input value={testo} onChange={e=>setTesto(e.target.value)} placeholder="Scrivi un messaggio o un report..." className="flex-1 px-4 py-3 bg-slate-100 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" />
+                        <button type="submit" className="bg-indigo-600 text-white px-4 py-3 rounded-xl font-bold hover:bg-indigo-700">Invia</button>
+                    </form>
                 </div>
             );
         }
@@ -308,7 +515,8 @@
             const [cassaPerc, setCassaPerc] = React.useState(4);
 
             React.useEffect(() => {
-                db.collection('pazienti').where('infermiereId', '==', userId).get().then(s => {
+                // Modifica per mostrare anche i pazienti condivisi nel calcolatore
+                db.collection('pazienti').where('accessList', 'array-contains', auth.currentUser.email).get().then(s => {
                     const l = []; s.forEach(d => l.push({id: d.id, ...d.data()})); 
                     l.sort((a,b) => a.nome.localeCompare(b.nome));
                     setPazientiList(l);
@@ -358,8 +566,13 @@
                 if(!prestazione) return alert("Inserisci una prestazione.");
                 
                 await db.collection('prestazioni').add({
-                    pazienteId: pazienteObj.id, infermiereId: userId, desc: prestazione,
-                    importo: totaleDaPagare, data: new Date().toLocaleDateString(), dataOriginale: new Date().toISOString()
+                    pazienteId: pazienteObj.id, 
+                    infermiereId: userId, 
+                    creatorEmail: auth.currentUser.email,
+                    desc: prestazione,
+                    importo: totaleDaPagare, 
+                    data: new Date().toLocaleDateString(), 
+                    dataOriginale: new Date().toISOString()
                 });
                 alert("✅ Salvato con successo!");
             };
@@ -500,111 +713,7 @@
             );
         }
 
-        // --- GEMINI AI VERA CON MODELLO AGGIORNATO ---
-        function AssistenteAI() {
-            const [savedKey, setSavedKey] = React.useState(localStorage.getItem('my_gemini_key_pro') || '');
-            const [tempKey, setTempKey] = React.useState('');
-            
-            const [input, setInput] = React.useState('');
-            const [chat, setChat] = React.useState([{role: 'model', test: 'Ciao! Sono MyDoctor AI. Fammi una domanda clinica!'}]);
-            const [loading, setLoading] = React.useState(false);
-
-            if (!savedKey) {
-                return (
-                    <div className="max-w-4xl mx-auto h-[85vh] flex flex-col items-center justify-center bg-white rounded-3xl shadow-sm border p-6 text-center">
-                        <span className="text-6xl mb-4">🤖</span>
-                        <h2 className="text-2xl font-black mb-2 text-indigo-900">Configura MyDoctor AI</h2>
-                        <p className="mb-6 text-slate-500 text-sm max-w-md">Per motivi di sicurezza, la tua chiave segreta non verrà salvata su internet, ma solo nella <b>memoria del tuo dispositivo</b>.</p>
-                        
-                        <input 
-                            type="password" 
-                            placeholder="Incolla qui la chiave (inizia con AIza...)" 
-                            className="w-full max-w-md p-4 border rounded-xl mb-4 bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500" 
-                            value={tempKey} 
-                            onChange={e=>setTempKey(e.target.value)} 
-                        />
-                        <button 
-                            onClick={() => {
-                                if(tempKey.length > 10) {
-                                    localStorage.setItem('my_gemini_key_pro', tempKey.trim());
-                                    setSavedKey(tempKey.trim());
-                                } else {
-                                    alert("Inserisci una chiave valida.");
-                                }
-                            }} 
-                            className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg w-full max-w-md"
-                        >
-                            Salva Chiave e Inizia
-                        </button>
-                    </div>
-                );
-            }
-
-            const askGemini = async () => {
-                if(!input.trim()) return;
-                
-                const msg = input;
-                setChat(prev => [...prev, {role: 'user', text: msg}]);
-                setInput('');
-                setLoading(true);
-
-                try {
-                    // QUI HO AGGIORNATO IL MODELLO A gemini-1.5-flash-latest COME CHIESTO DA GOOGLE
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${savedKey}`;
-                    const payload = {
-                        contents: [{ parts: [{ text: "Sei un assistente per un Medico professionista in Italia. Rispondi in modo conciso e clinico. Domanda: " + msg }] }]
-                    };
-
-                    const response = await fetch(url, {
-                        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
-                    });
-                    const result = await response.json();
-                    
-                    if(result.error) throw new Error(result.error.message);
-
-                    const reply = result.candidates[0].content.parts[0].text;
-                    setChat(prev => [...prev, {role: 'model', text: reply}]);
-                } catch(e) {
-                    if (e.message.includes("API key not valid")) {
-                        localStorage.removeItem('my_gemini_key_pro');
-                        setSavedKey('');
-                        alert("La chiave inserita non è valida o è scaduta. Inseriscila di nuovo.");
-                    } else {
-                        setChat(prev => [...prev, {role: 'model', text: 'Errore API: ' + e.message}]);
-                    }
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            return (
-                <div className="max-w-4xl mx-auto h-[85vh] flex flex-col bg-white rounded-3xl shadow-sm border overflow-hidden">
-                    <div className="bg-indigo-900 text-white p-4 flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                            <span className="text-3xl">🤖</span>
-                            <div><h2 className="font-bold text-lg">MyDoctor AI</h2><p className="text-xs text-indigo-300">Intelligenza Artificiale Attiva</p></div>
-                        </div>
-                        <button onClick={() => { localStorage.removeItem('my_gemini_key_pro'); setSavedKey(''); }} className="text-xs bg-indigo-800 px-3 py-1 rounded text-indigo-200 hover:bg-indigo-700">Cambia Chiave</button>
-                    </div>
-
-                    <div className="flex-1 p-4 overflow-y-auto bg-slate-50 flex flex-col gap-4">
-                        {chat.map((m, i) => (
-                            <div key={i} className={`p-4 max-w-[85%] rounded-2xl ${m.role==='user' ? 'bg-indigo-600 text-white self-end rounded-tr-none' : 'bg-slate-200 text-slate-800 self-start rounded-tl-none'}`}>
-                                <p className="whitespace-pre-wrap text-sm leading-relaxed">{m.text || m.test}</p>
-                            </div>
-                        ))}
-                        {loading && <div className="self-start text-indigo-500 font-bold animate-pulse text-sm">Sto analizzando...</div>}
-                    </div>
-                    
-                    <div className="p-3 md:p-4 bg-white border-t flex gap-2">
-                        <input value={input} onChange={e=>setInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && askGemini()} placeholder="Scrivi un sintomo, dosaggio..." className="flex-1 px-4 py-3 bg-slate-100 border rounded-xl outline-none" />
-                        <button onClick={askGemini} className="bg-indigo-600 text-white px-4 md:px-6 py-3 rounded-xl font-bold">Invia</button>
-                    </div>
-                </div>
-            );
-        }
-
-        function Dashboard({setView}) { return (<div className="max-w-4xl mx-auto"><h2 className="text-2xl md:text-3xl font-black mb-6">Benvenuto in MyDoctorApp! 👋</h2><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div onClick={()=>setView('listino')} className="bg-white p-6 rounded-3xl border cursor-pointer hover:shadow-md"><div className="text-4xl mb-3">📋</div><h3 className="font-bold text-lg">Il Mio Listino</h3></div><div onClick={()=>setView('calcolatore')} className="bg-white p-6 rounded-3xl border cursor-pointer hover:shadow-md"><div className="text-4xl mb-3">🧮</div><h3 className="font-bold text-lg">Fatturazione Veloce</h3></div></div></div>); }
+        function Dashboard({setView}) { return (<div className="max-w-4xl mx-auto"><h2 className="text-2xl md:text-3xl font-black mb-6">Benvenuto in MyDoctorApp! 👋</h2><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div onClick={()=>setView('listino')} className="bg-white p-6 rounded-3xl border cursor-pointer"><div className="text-4xl mb-3">📋</div><h3 className="font-bold text-lg">Il Mio Listino</h3></div><div onClick={()=>setView('calcolatore')} className="bg-white p-6 rounded-3xl border cursor-pointer"><div className="text-4xl mb-3">🧮</div><h3 className="font-bold text-lg">Fatturazione Veloce</h3></div><div onClick={()=>setView('messaggi')} className="bg-white p-6 rounded-3xl border cursor-pointer md:col-span-2"><div className="text-4xl mb-3">💬</div><h3 className="font-bold text-lg">Messaggi e Condivisione</h3><p className="text-sm text-slate-500 mt-1">Comunica con i colleghi e condividi l'accesso alle cartelle cliniche.</p></div></div></div>); }
         function AdminPanel() { return <div className="text-center p-8"><h2 className="text-3xl font-black mb-4">👑 Pannello Admin</h2><p>Le funzioni Admin sono attive.</p></div>; }
         function InAttesa({auth}) { return <div className="h-screen flex items-center justify-center p-4"><div className="bg-white p-8 rounded-xl shadow-lg text-center"><h2 className="text-2xl font-bold text-amber-600">In Attesa</h2><button onClick={()=>auth.signOut()} className="underline mt-4 text-indigo-600">Esci</button></div></div>; }
         function LoginScreen() { 

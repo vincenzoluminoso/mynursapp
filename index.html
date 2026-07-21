@@ -197,8 +197,12 @@
             const [importo, setImporto] = React.useState('');
 
             React.useEffect(() => {
-                return db.collection('spese').where('userId', '==', userId).orderBy('data', 'desc').onSnapshot(snap => {
-                    const l = []; snap.forEach(d => l.push({id: d.id, ...d.data()})); setSpese(l);
+                return db.collection('spese').where('userId', '==', userId).onSnapshot(snap => {
+                    const l = []; 
+                    snap.forEach(d => l.push({id: d.id, ...d.data()})); 
+                    // Ordiniamo lato client per evitare problemi di indici mancanti su Firestore
+                    l.sort((a, b) => new Date(b.data) - new Date(a.data));
+                    setSpese(l);
                 });
             }, [userId]);
 
